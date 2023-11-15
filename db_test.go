@@ -27,6 +27,27 @@ func renameTable(old_name, new_name string) {
 	}
 }
 
+func createTable(name string) {
+	_, err := db.db.Exec(fmt.Sprintf(`
+	create table go_recsys.%s
+	(
+		key varchar(100) primary key,
+		inn_kpp varchar(22),
+		num int not null
+	)
+	`, name))
+	if err != nil {
+		panic(err.Error())
+	}
+
+	_, err = db.db.Exec(fmt.Sprintf(`
+	create index index_%s_inn_kpp on go_recsys.supplier_info(inn_kpp)
+	`, name))
+	if err != nil {
+		panic(err.Error())
+	}
+}
+
 func dropTable(name string) {
 	_, err := db.db.Exec(fmt.Sprintf(`
 	drop table if exists go_recsys.%s
@@ -34,11 +55,6 @@ func dropTable(name string) {
 	if err != nil {
 		panic(err.Error())
 	}
-}
-
-func dropRename(old_name, new_name string) {
-	dropTable(new_name)
-	renameTable(old_name, new_name)
 }
 
 func selectCount() int {
@@ -55,22 +71,22 @@ func selectCount() int {
 
 func selectNum(key string) int {
 	var v int
-	row := db.db.QueryRow(`
+	row := db.db.QueryRow(fmt.Sprintf(`
 	select num
 		from go_recsys.supplier_info
 		where key = '%s'
-	`, key)
+	`, key))
 	if err := row.Scan(&v); err != nil {
 		panic(err.Error())
 	}
 	return v
 }
 
-func TestCreateSupplierHist(t *testing.T) {
+func TestCreateSupplierInfo(t *testing.T) {
 	renameTable("supplier_info", "temp_supplier_info")
-	defer dropRename("temp_supplier_info", "supplier_info")
-
-	db.CreateSupplierInfo("supplier_infoTemp_inn_kpp_index")
+	createTable("supplier_info")
+	defer renameTable("temp_supplier_info", "supplier_info")
+	defer dropTable("supplier_info")
 
 	row := db.db.QueryRow(`
 	select count(*) 
@@ -84,8 +100,10 @@ func TestCreateSupplierHist(t *testing.T) {
 }
 
 func TestClearSupplierInfo(t *testing.T) {
-	renameTable("SupplierInfo", "TempSupplierInfo")
-	defer dropRename("TempSupplierInfo", "SupplierInfo")
+	renameTable("supplier_info", "temp_supplier_info")
+	createTable("supplier_info")
+	defer renameTable("temp_supplier_info", "supplier_info")
+	defer dropTable("supplier_info")
 
 	_, err := db.db.Exec(`
 	insert into go_recsys.supplier_info values
@@ -97,106 +115,62 @@ func TestClearSupplierInfo(t *testing.T) {
 	if err != nil {
 		panic(err.Error())
 	}
-	row := db.db.QueryRow(`
-	select count(*)
-		from go_recsys.supplier_info
-	`)
-	var c int
-	if err := row.Scan(&c); err != nil {
-		panic(err.Error())
-	}
-	if c != 4 {
+
+	if c := selectCount(); c != 4 {
 		panic(fmt.Sprintf("Bad insert into supplier_info, must 4, get %v", c))
 	}
-
 	db.ClearSupplierInfo()
-	row = db.db.QueryRow(`
-	select count(*)
-		from go_recsys.supplier_info
-	`)
-	if err := row.Scan(&c); err != nil {
-		panic(err.Error())
-	}
-	if c != 0 {
+	if c := selectCount(); c != 0 {
 		t.Errorf("Num rows must be 0, get %v", c)
 	}
 }
 
 func TestIncr(t *testing.T) {
-	renameTable("SupplierInfo", "TempSupplierInfo")
-	defer dropRename("TempSupplierInfo", "SupplierInfo")
+	renameTable("supplier_info", "temp_supplier_info")
+	createTable("supplier_info")
+	defer renameTable("temp_supplier_info", "supplier_info")
+	defer dropTable("supplier_info")
 
 	var v int
-	sql_count := `
-	select count(*)
-		from go_recsys.supplier_info
-	`
-	sql_num := `
-	select num
-		from go_recsys.supplier_info
-		where key = 'pr:1:1'
-	`
 
-	row := db.db.QueryRow(sql_count)
-	if err := row.Scan(&v); err != nil {
-		panic(err.Error())
-	}
-	if v != 0 {
-		t.Errorf("Num rows must be 0, get %v", v)
+	if v = selectCount(); v != 0 {
+		t.Errorf("Count rows must be 0, get %v", v)
 	}
 
 	db.Incr("pr:1:1", 1)
-	row = db.db.QueryRow(sql_count)
-	if err := row.Scan(&v); err != nil {
-		panic(err.Error())
+	if v = selectCount(); v != 1 {
+		t.Errorf("Count rows must be 1, get %v", v)
 	}
-	if v != 1 {
-		t.Errorf("Num rows must be 0, get %v", v)
-	}
-	row = db.db.QueryRow(sql_num)
-	if err := row.Scan(&v); err != nil {
-		panic(err.Error())
-	}
-	if v != 1 {
-		t.Errorf("Num rows must be 0, get %v", v)
+
+	if v = selectNum("pr:1:1"); v != 1 {
+		t.Errorf("Num must be 1, get %v", v)
 	}
 
 	db.Incr("pr:1:1", 10)
-	row = db.db.QueryRow(sql_count)
-	if err := row.Scan(&v); err != nil {
-		panic(err.Error())
+	if v = selectCount(); v != 1 {
+		t.Errorf("Count rows must be 0, get %v", v)
 	}
-	if v != 1 {
-		t.Errorf("Num rows must be 0, get %v", v)
-	}
-	row = db.db.QueryRow(sql_num)
-	if err := row.Scan(&v); err != nil {
-		panic(err.Error())
-	}
-	if v != 11 {
-		t.Errorf("Num rows must be 0, get %v", v)
+	if v = selectNum("pr:1:1"); v != 11 {
+		t.Errorf("Num must be 11, get %v", v)
 	}
 
 	db.Incr("pr:1:2", 5)
-	row = db.db.QueryRow(sql_count)
-	if err := row.Scan(&v); err != nil {
-		panic(err.Error())
+	if v = selectCount(); v != 2 {
+		t.Errorf("Count rows must be 2, get %v", v)
 	}
-	if v != 2 {
-		t.Errorf("Num rows must be 0, get %v", v)
+	if v = selectNum("pr:1:1"); v != 11 {
+		t.Errorf("Num must be 11, get %v", v)
 	}
-	row = db.db.QueryRow(sql_num)
-	if err := row.Scan(&v); err != nil {
-		panic(err.Error())
-	}
-	if v != 11 {
-		t.Errorf("Num rows must be 0, get %v", v)
+	if v = selectNum("pr:1:2"); v != 5 {
+		t.Errorf("Num must be 5, get %v", v)
 	}
 }
 
 func TestIncrby(t *testing.T) {
-	renameTable("SupplierInfo", "TempSupplierInfo")
-	defer dropRename("TempSupplierInfo", "SupplierInfo")
+	renameTable("supplier_info", "temp_supplier_info")
+	createTable("supplier_info")
+	defer renameTable("temp_supplier_info", "supplier_info")
+	defer dropTable("supplier_info")
 
 	var v int
 
@@ -204,60 +178,38 @@ func TestIncrby(t *testing.T) {
 		t.Errorf("Num rows must be 0, get %v", v)
 	}
 
-	db.Incr("pr:1:1", 1)
-	if v = selectCount(); v != 1 {
-		t.Errorf("Num rows must be 0, get %v", v)
+	db.IncrBy([]IncrByData{
+		{"pr:1:1", "1_1", 1},
+		{"pr:1:2", "1_1", 2},
+	})
+	if v = selectCount(); v != 2 {
+		t.Errorf("Count rows must be 2, get %v", v)
 	}
 	if v = selectNum("pr:1:1"); v != 1 {
-		t.Errorf("Num rows must be 0, get %v", v)
+		t.Errorf("Num must be 1, get %v", v)
+	}
+	if v = selectNum("pr:1:2"); v != 2 {
+		t.Errorf("Num must be 2, get %v", v)
 	}
 
-	db.Incr("pr:1:1", 10)
-	if v = selectCount(); v != 1 {
-		t.Errorf("Num rows must be 0, get %v", v)
+	db.IncrBy([]IncrByData{
+		{"pr:1:1", "1_1", 3},
+		{"pr:1:2", "1_1", 3},
+		{"pr:1:3", "1_1", 1},
+	})
+	if v = selectCount(); v != 3 {
+		t.Errorf("Count rows must be 3, get %v", v)
 	}
-
-	if v = selectNum("pr:1:1"); v != 11 {
-		t.Errorf("Num rows must be 0, get %v", v)
-	}
-
-	db.Incr("pr:1:2", 5)
-	if v = selectCount(); v != 2 {
-		t.Errorf("Num rows must be 0, get %v", v)
-	}
-	if v = selectNum("pr:1:1"); v != 11 {
-		t.Errorf("Num rows must be 0, get %v", v)
+	if v = selectNum("pr:1:1"); v != 4 {
+		t.Errorf("Num must be 4, get %v", v)
 	}
 	if v = selectNum("pr:1:2"); v != 5 {
-		t.Errorf("Num rows must be 0, get %v", v)
+		t.Errorf("Num must be 5, get %v", v)
+	}
+	if v = selectNum("pr:1:3"); v != 1 {
+		t.Errorf("Num must be 1, get %v", v)
 	}
 }
-
-//     def test_incrby(self):
-//         db.create_dict()
-
-//         sql = f"""
-//         delete from public.{db.dict_name}
-//             where key = 'test_id'
-//                 or key = 'test_id2';
-//         """
-//         db.execute(sql)
-
-//         assert db.get('test_id') == 0
-//         db.incrby({'test_id': ('innkpp', 1)})
-//         assert db.get('test_id') == 1
-//         assert db.get('test_id2') == 0
-//         db.incrby({'test_id': ('innkpp', 1), 'test_id2': ('innkpp', 5)})
-//         assert db.get('test_id') == 2
-//         assert db.get('test_id2') == 5
-//         db.incrby([('test_id', 'innkpp', 2)])
-//         assert db.get('test_id') == 4
-//         assert db.get('test_id2') == 5
-//         db.incrby([('test_id', 'innkpp', 2), ('test_id2', 'innkpp', 2)])
-//         assert db.get('test_id') == 6
-//         assert db.get('test_id2') == 7
-
-//         db.execute(sql)
 
 //     def test_get(self):
 //         db.create_dict()

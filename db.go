@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"text/template"
 
 	_ "github.com/lib/pq"
 )
@@ -100,8 +101,45 @@ func (db RecSysDataBase) Incr(key string, v int) {
 	on conflict (key)
 	do update set
 		key = excluded.key,
-		num = go_recsys.supplier_info.num + excluded.num
+		num = supplier_info.num + excluded.num
 	`, key, inn_kpp, v))
+	if err != nil {
+		panic(err.Error())
+	}
+}
+
+type IncrByData struct {
+	Key    string
+	InnKpp string
+	Num    int
+}
+
+type IncrByDataSplit struct {
+	UntilLast []IncrByData
+	Last      IncrByData
+}
+
+func (db RecSysDataBase) IncrBy(rows []IncrByData) {
+	tmpl, err := template.New("IncrBy").Parse(`
+	insert into go_recsys.supplier_info values
+	{{ range .UntilLast }}
+	('{{ .Key }}', '{{ .InnKpp }}', {{ .Num }}),
+	{{ end }}
+	('{{ .Last.Key }}', '{{ .Last.InnKpp }}', {{ .Last.Num }})
+	on conflict (key)
+	do update set
+		key = excluded.key,
+		num = supplier_info.num + excluded.num
+	`)
+	if err != nil {
+		panic(err.Error())
+	}
+
+	splitRows := IncrByDataSplit{rows[:len(rows)-1], rows[len(rows)-1]}
+	buff := new(strings.Builder)
+	tmpl.Execute(buff, splitRows)
+
+	_, err = db.db.Exec(buff.String())
 	if err != nil {
 		panic(err.Error())
 	}
