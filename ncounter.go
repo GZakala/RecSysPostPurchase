@@ -110,6 +110,9 @@ func (nc NCounter) Print() {
 // Строитель ключей для NCounter.
 type KeyBuilder struct{}
 
+func (kb KeyBuilder) FromString(key string) KeyInterface {
+}
+
 // Создать ключ RC.
 func (kb KeyBuilder) Region(region_code string) (RC, error) {
 	if !validateRegionCode(region_code) {
